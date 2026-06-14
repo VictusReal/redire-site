@@ -254,13 +254,14 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.9;
+renderer.toneMappingExposure = 0.55;
 document.body.appendChild(renderer.domElement);
 
 // ─── SCENE / CAMERA ──────────────────────────────────────────────────────────
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.5, 400000);
-camera.position.set(0, 500, 3000);
+// Sun-like position: ~8 kpc from galactic centre, slightly above disc
+camera.position.set(0, 300, 7800);
 
 // ─── POST-PROCESSING ─────────────────────────────────────────────────────────
 const composer = new EffectComposer(renderer);
@@ -268,9 +269,9 @@ composer.addPass(new RenderPass(scene, camera));
 
 const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.65,  // strength
-    0.38,  // radius
-    0.18   // threshold
+    0.18,  // strength  — subtle glow only
+    0.25,  // radius
+    0.35   // threshold — only the brightest pixels glow
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -381,7 +382,7 @@ function makeStarField(count, spread, sMin, sMax) {
             void main(){
                 vCol = color;
                 vec4 mv = modelViewMatrix * vec4(position,1.);
-                gl_PointSize = pSize * (900. / -mv.z);
+                gl_PointSize = clamp(pSize * (600. / -mv.z), 0.5, 6.0);
                 gl_Position  = projectionMatrix * mv;
             }`,
         fragmentShader: `
@@ -390,7 +391,7 @@ function makeStarField(count, spread, sMin, sMax) {
             void main(){
                 vec4 t = texture2D(tex, gl_PointCoord);
                 if(t.a < 0.01) discard;
-                gl_FragColor = vec4(vCol * t.r, t.a);
+                gl_FragColor = vec4(vCol * t.r, t.a * 0.9);
             }`,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -537,7 +538,7 @@ function createGalaxy(cfg) {
             void main(){
                 vCol = color;
                 vec4 mv = modelViewMatrix * vec4(position,1.);
-                gl_PointSize = pSize * (1400. / -mv.z);
+                gl_PointSize = clamp(pSize * (900. / -mv.z), 0.4, 5.0);
                 gl_Position  = projectionMatrix * mv;
             }`,
         fragmentShader: `
@@ -546,7 +547,7 @@ function createGalaxy(cfg) {
             void main(){
                 vec4 t = texture2D(tex, gl_PointCoord);
                 if(t.a < 0.005) discard;
-                gl_FragColor = vec4(vCol * t.r, t.a);
+                gl_FragColor = vec4(vCol * t.r, t.a * 0.85);
             }`,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -657,23 +658,174 @@ function addBrightStar(pos, col, r) {
     scene.add(halo);
 }
 
+// ─── MILKY WAY (dedicated high-detail barred spiral) ─────────────────────────
+function createMilkyWay() {
+    const N      = 350000;
+    const RADIUS = 9000;
+    const TILT   = Math.PI * 0.08;
+
+    const positions = new Float32Array(N * 3);
+    const colors    = new Float32Array(N * 3);
+    const sizes     = new Float32Array(N);
+
+    // 4 named arm base angles (barred spiral — arms emerge from bar tips)
+    const ARM_ANGLES = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+    // Each arm has a dominant colour — cold blue OB stars, warm yellow old stars
+    const ARM_COLS = [
+        new THREE.Color(0.55, 0.70, 1.00),  // Sagittarius — blue-white
+        new THREE.Color(0.40, 0.60, 1.00),  // Perseus
+        new THREE.Color(0.50, 0.65, 0.95),  // Scutum-Centaurus
+        new THREE.Color(0.45, 0.62, 1.00),  // Norma
+    ];
+    const CORE_COL = new THREE.Color(1.00, 0.88, 0.58); // warm golden
+    const BAR_COL  = new THREE.Color(1.00, 0.80, 0.45); // bar — yellow
+
+    for (let i = 0; i < N; i++) {
+        const rand = Math.random();
+        let x, y, z, col, sz;
+
+        if (rand < 0.04) {
+            // ── Bright nucleus (SMBH region) ──
+            const r  = Math.pow(Math.random(), 3.0) * RADIUS * 0.025;
+            const th = Math.random() * Math.PI * 2;
+            x = r * Math.cos(th);
+            z = r * Math.sin(th);
+            y = (Math.random() - .5) * r * 0.15;
+            col = new THREE.Color(1.0, 0.95, 0.80);
+            col.multiplyScalar(rnd(1.4, 2.2));
+            sz = rnd(3.5, 7.0);
+
+        } else if (rand < 0.16) {
+            // ── Spheroidal bulge ──
+            const r  = Math.pow(Math.random(), 1.5) * RADIUS * 0.20;
+            const th = Math.random() * Math.PI * 2;
+            const ph = Math.acos(2 * Math.random() - 1);
+            x = r * Math.sin(ph) * Math.cos(th);
+            z = r * Math.cos(ph) * 0.65;
+            y = r * Math.sin(ph) * Math.sin(th) * 0.50;
+            col = CORE_COL.clone().lerp(new THREE.Color(1,.95,.7), Math.random());
+            col.multiplyScalar(rnd(0.55, 1.10));
+            sz = rnd(0.8, 3.2);
+
+        } else if (rand < 0.24) {
+            // ── Central bar ──
+            const t  = Math.random();                 // position along bar
+            const barAngle = 0.77;                    // ~44° bar tilt
+            const barLen   = RADIUS * 0.22;
+            const barW     = RADIUS * 0.055;
+            const bx = (t - 0.5) * 2.0 * barLen;
+            const bz = (Math.random() - .5) * barW * (1 - Math.abs(t - .5));
+            x =  bx * Math.cos(barAngle) - bz * Math.sin(barAngle);
+            z =  bx * Math.sin(barAngle) + bz * Math.cos(barAngle);
+            y = (Math.random() - .5) * barW * 0.15;
+            col = BAR_COL.clone().lerp(CORE_COL, Math.random());
+            col.multiplyScalar(rnd(0.5, 1.0));
+            sz = rnd(0.7, 2.8);
+
+        } else if (rand < 0.88) {
+            // ── Spiral arms ──
+            const armIdx  = rndI(0, 4);
+            const baseAng = ARM_ANGLES[armIdx];
+            // r: more weight toward inner half (exponential density)
+            const r       = RADIUS * 0.08 + Math.pow(Math.random(), 0.5) * RADIUS * 0.92;
+            const logSpiral = baseAng + (r / RADIUS) * 4.8 * Math.PI; // ~2.4 full turns
+            // Arm width: tight near core, slightly wider at edges
+            const armW    = (0.06 + 0.10 * (r / RADIUS)) * r;
+            const scatter = (Math.random() - .5) * armW * 2.0;
+            x = (r + scatter * 0.6) * Math.cos(logSpiral + scatter * 0.0002);
+            z = (r + scatter * 0.6) * Math.sin(logSpiral + scatter * 0.0002);
+            // Disc thickness: sech² distribution, very thin (real MW ~1 kly thick)
+            const h = RADIUS * 0.018 * Math.exp(-r / (RADIUS * 0.6));
+            y = h * Math.tan((Math.random() - .5) * 1.4); // sech² approx
+
+            const t = Math.min(r / RADIUS, 1.0);
+            // Gradient: warm core → blue arm → dimmer outer
+            const armCol = ARM_COLS[armIdx].clone();
+
+            // HII emission regions (4% chance — bright blue-pink clumps)
+            if (Math.random() < 0.04) {
+                col = new THREE.Color(0.60, 0.75, 1.00)
+                    .lerp(new THREE.Color(1.0, 0.55, 0.80), Math.random() * 0.4);
+                col.multiplyScalar(rnd(0.9, 1.6));
+                sz = rnd(1.8, 4.5);
+            } else {
+                col = CORE_COL.clone().lerp(armCol, Math.min(t * 1.1, 1.0));
+                col.multiplyScalar(rnd(0.20, 0.90));
+                sz = rnd(0.3, 2.2);
+            }
+
+        } else {
+            // ── Stellar halo (sparse, slightly blue) ──
+            const r  = rnd(RADIUS * 0.15, RADIUS * 1.05);
+            const th = Math.random() * Math.PI * 2;
+            const ph = Math.acos(2 * Math.random() - 1);
+            x = r * Math.sin(ph) * Math.cos(th);
+            z = r * Math.cos(ph) * 0.35;
+            y = r * Math.sin(ph) * Math.sin(th) * 0.25;
+            col = new THREE.Color(0.65, 0.75, 1.0);
+            col.multiplyScalar(rnd(0.06, 0.22));
+            sz = rnd(0.3, 1.5);
+        }
+
+        positions[i*3]=x; positions[i*3+1]=y; positions[i*3+2]=z;
+        colors[i*3]=col.r; colors[i*3+1]=col.g; colors[i*3+2]=col.b;
+        sizes[i] = sz;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+    geo.setAttribute('pSize',    new THREE.BufferAttribute(sizes,     1));
+
+    const mat = new THREE.ShaderMaterial({
+        uniforms: { tex: { value: GALAXY_TEX } },
+        vertexShader: `
+            attribute float pSize;
+            attribute vec3 color;
+            varying vec3 vCol;
+            void main(){
+                vCol = color;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = clamp(pSize * (1000.0 / -mv.z), 0.4, 5.5);
+                gl_Position  = projectionMatrix * mv;
+            }`,
+        fragmentShader: `
+            uniform sampler2D tex;
+            varying vec3 vCol;
+            void main(){
+                vec4 t = texture2D(tex, gl_PointCoord);
+                if(t.a < 0.005) discard;
+                gl_FragColor = vec4(vCol * t.r, t.a * 0.88);
+            }`,
+        blending:   THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+    });
+
+    const group = new THREE.Group();
+    group.add(new THREE.Points(geo, mat));
+    group.rotation.x = TILT;
+
+    // Central glow sphere
+    const coreGeo = new THREE.SphereGeometry(RADIUS * 0.012, 16, 16);
+    const coreMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.85, 0.50) });
+    group.add(new THREE.Mesh(coreGeo, coreMat));
+
+    scene.add(group);
+    galaxyRegistry.push({ group, name:'Млечный Путь', type:'spiral', pos: new THREE.Vector3(), radius: RADIUS });
+    return group;
+}
+
 // ─── POPULATE UNIVERSE ───────────────────────────────────────────────────────
 
-// Milky Way (player is inside/near it)
-createGalaxy({
-    name:'Млечный Путь',
-    pos: new THREE.Vector3(0,0,0),
-    type:'spiral', radius:9000, arms:4, twist:5, n:200000,
-    corCol: new THREE.Color(1.0, 0.85, 0.45),
-    armCol: new THREE.Color(0.35, 0.55, 1.0),
-    tilt: Math.PI * 0.08,
-});
+// Milky Way — high-detail dedicated barred spiral
+createMilkyWay();
 
 // Andromeda
 createGalaxy({
     name:'Галактика Андромеды (M31)',
     pos: new THREE.Vector3(32000, 5500, -16000),
-    type:'spiral', radius:10000, arms:2, twist:3.5, n:160000,
+    type:'spiral', radius:10000, arms:2, twist:3.5, n:80000,
     corCol: new THREE.Color(1.0, 0.92, 0.72),
     armCol: new THREE.Color(0.45, 0.65, 1.0),
     tilt: Math.PI * 0.28,
@@ -683,7 +835,7 @@ createGalaxy({
 createGalaxy({
     name:'Галактика Треугольника (M33)',
     pos: new THREE.Vector3(20000, -3500, -26000),
-    type:'spiral', radius:4500, arms:3, twist:4.2, n:90000,
+    type:'spiral', radius:4500, arms:3, twist:4.2, n:45000,
     corCol: new THREE.Color(0.9, 0.82, 0.62),
     armCol: new THREE.Color(0.28, 0.48, 0.95),
     tilt: Math.PI * 0.18,
@@ -693,7 +845,7 @@ createGalaxy({
 createGalaxy({
     name:'Водоворот (M51)',
     pos: new THREE.Vector3(-27000, 9000, -42000),
-    type:'spiral', radius:5500, arms:2, twist:6.5, n:100000,
+    type:'spiral', radius:5500, arms:2, twist:6.5, n:50000,
     corCol: new THREE.Color(1.0, 0.72, 0.30),
     armCol: new THREE.Color(0.18, 0.48, 1.0),
     tilt: Math.PI * 0.04,
