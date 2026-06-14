@@ -115,6 +115,81 @@
             animation: sweep 1.4s linear infinite;
         }
         @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+
+        /* ── MOBILE TOUCH CONTROLS ── */
+        #touch-look {
+            position: fixed; inset: 0;
+            display: none;
+            touch-action: none;
+            z-index: 5;
+        }
+        #joystick-zone {
+            position: fixed;
+            left: 0; bottom: 0;
+            width: 48%;
+            height: 55%;
+            display: none;
+            align-items: flex-end;
+            justify-content: flex-start;
+            padding: 30px;
+            touch-action: none;
+            z-index: 10;
+        }
+        #joystick-ring {
+            width: 110px; height: 110px;
+            border: 1.5px solid rgba(100,200,255,0.3);
+            border-radius: 50%;
+            position: relative;
+            background: rgba(100,200,255,0.04);
+            box-shadow: 0 0 20px rgba(100,200,255,0.1);
+            flex-shrink: 0;
+        }
+        #joystick-dot {
+            width: 44px; height: 44px;
+            background: radial-gradient(circle, rgba(100,200,255,0.7), rgba(60,140,255,0.3));
+            border-radius: 50%;
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%,-50%);
+            box-shadow: 0 0 14px rgba(100,200,255,0.5);
+            transition: transform 0.05s;
+            pointer-events: none;
+        }
+        #boost-btn {
+            position: fixed;
+            right: 28px; bottom: 38px;
+            width: 64px; height: 64px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255,180,80,0.5);
+            background: rgba(255,160,50,0.1);
+            color: rgba(255,200,100,0.9);
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            letter-spacing: 1px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            text-align: center;
+            z-index: 10;
+            touch-action: none;
+            user-select: none;
+            box-shadow: 0 0 16px rgba(255,160,50,0.2);
+            line-height: 1.3;
+        }
+        #boost-btn.active {
+            background: rgba(255,160,50,0.3);
+            box-shadow: 0 0 24px rgba(255,160,50,0.5);
+        }
+        #boost-btn span { font-size: 20px; }
+
+        @media (max-width: 768px) {
+            #hud h1 { font-size: 12px; letter-spacing: 2px; }
+            #hud    { font-size: 11px; top: 12px; left: 12px; }
+            #nearest { font-size: 10px; top: 12px; right: 12px; }
+            #nearestName { font-size: 12px; }
+            #crosshair { display: none; }
+        }
     </style>
 </head>
 <body>
@@ -148,6 +223,15 @@
 <div id="controls">
     WASD / СТРЕЛКИ — Движение &nbsp;|&nbsp; МЫШЬ — Поворот &nbsp;|&nbsp; SHIFT — Ускорение ×10 &nbsp;|&nbsp; Q/E — Вверх/Вниз
 </div>
+
+<!-- Mobile touch controls -->
+<div id="touch-look"></div>
+
+<div id="joystick-zone">
+    <div id="joystick-ring"><div id="joystick-dot"></div></div>
+</div>
+
+<div id="boost-btn"><span>⚡</span>BOOST</div>
 
 <script type="importmap">
 {
@@ -666,6 +750,93 @@ document.addEventListener('mousemove', e => {
     pitch  = Math.max(-Math.PI/2+.01, Math.min(Math.PI/2-.01, pitch));
 });
 
+// ─── MOBILE / TOUCH ──────────────────────────────────────────────────────────
+const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+// Virtual joystick state
+const joyState = { active: false, id: -1, ox: 0, oy: 0, dx: 0, dy: 0 };
+let   touchBoost = false;
+
+if (isMobile) {
+    // Show mobile UI, hide desktop hints
+    document.getElementById('hint').style.display = 'none';
+    document.getElementById('controls').style.display = 'none';
+    document.getElementById('touch-look').style.display = 'block';
+    document.getElementById('joystick-zone').style.display = 'flex';
+    document.getElementById('boost-btn').style.display = 'flex';
+
+    const joyZone  = document.getElementById('joystick-zone');
+    const joyRing  = document.getElementById('joystick-ring');
+    const joyDot   = document.getElementById('joystick-dot');
+    const lookZone = document.getElementById('touch-look');
+    const boostBtn = document.getElementById('boost-btn');
+    const JR = 55; // joystick radius in px
+
+    // ── JOYSTICK ────────────────────────────────────────────────────────────
+    joyZone.addEventListener('touchstart', e => {
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        const rect = joyRing.getBoundingClientRect();
+        joyState.active = true;
+        joyState.id = t.identifier;
+        joyState.ox = rect.left + rect.width / 2;
+        joyState.oy = rect.top  + rect.height / 2;
+    }, { passive: false });
+
+    function updateJoy(touches) {
+        for (const t of touches) {
+            if (t.identifier !== joyState.id) continue;
+            let dx = t.clientX - joyState.ox;
+            let dy = t.clientY - joyState.oy;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len > JR) { dx = dx/len*JR; dy = dy/len*JR; }
+            joyState.dx = dx / JR;
+            joyState.dy = dy / JR;
+            joyDot.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        }
+    }
+    function releaseJoy(touches) {
+        for (const t of touches) {
+            if (t.identifier !== joyState.id) continue;
+            joyState.active = false;
+            joyState.dx = 0; joyState.dy = 0;
+            joyDot.style.transform = 'translate(-50%,-50%)';
+        }
+    }
+    joyZone.addEventListener('touchmove',   e => { e.preventDefault(); updateJoy(e.changedTouches); }, { passive: false });
+    joyZone.addEventListener('touchend',    e => releaseJoy(e.changedTouches));
+    joyZone.addEventListener('touchcancel', e => releaseJoy(e.changedTouches));
+
+    // ── LOOK (right area) ───────────────────────────────────────────────────
+    const lookTouches = new Map();
+    lookZone.addEventListener('touchstart', e => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            // ignore touches in joystick zone (left 48%)
+            if (t.clientX < window.innerWidth * 0.48) continue;
+            lookTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+        }
+    }, { passive: false });
+    lookZone.addEventListener('touchmove', e => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            const prev = lookTouches.get(t.identifier);
+            if (!prev) continue;
+            yaw   -= (t.clientX - prev.x) * 0.004;
+            pitch -= (t.clientY - prev.y) * 0.004;
+            pitch  = Math.max(-Math.PI/2+.01, Math.min(Math.PI/2-.01, pitch));
+            lookTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+        }
+    }, { passive: false });
+    lookZone.addEventListener('touchend',    e => { for (const t of e.changedTouches) lookTouches.delete(t.identifier); });
+    lookZone.addEventListener('touchcancel', e => { for (const t of e.changedTouches) lookTouches.delete(t.identifier); });
+
+    // ── BOOST BUTTON ────────────────────────────────────────────────────────
+    boostBtn.addEventListener('touchstart', e => { e.preventDefault(); touchBoost = true; boostBtn.classList.add('active'); }, { passive: false });
+    boostBtn.addEventListener('touchend',   e => { touchBoost = false; boostBtn.classList.remove('active'); });
+    boostBtn.addEventListener('touchcancel',e => { touchBoost = false; boostBtn.classList.remove('active'); });
+}
+
 // ─── HUD REFS ────────────────────────────────────────────────────────────────
 const $speed   = document.getElementById('speed');
 const $posX    = document.getElementById('posX');
@@ -713,7 +884,7 @@ function animate() {
     camera.quaternion.setFromEuler(euler);
 
     // Movement
-    const fast = keys['ShiftLeft'] || keys['ShiftRight'];
+    const fast = keys['ShiftLeft'] || keys['ShiftRight'] || touchBoost;
     const spd  = fast ? 3500 : 280;
 
     const fwd   = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
@@ -721,12 +892,24 @@ function animate() {
     const up    = new THREE.Vector3(0,1, 0);
 
     const move = new THREE.Vector3();
-    if (keys['KeyW'] || keys['ArrowUp'])    move.add(fwd);
-    if (keys['KeyS'] || keys['ArrowDown'])  move.sub(fwd);
-    if (keys['KeyA'] || keys['ArrowLeft'])  move.sub(right);
-    if (keys['KeyD'] || keys['ArrowRight']) move.add(right);
-    if (keys['KeyQ'] || keys['Space'])      move.add(up);
+    if (keys['KeyW'] || keys['ArrowUp'])     move.add(fwd);
+    if (keys['KeyS'] || keys['ArrowDown'])   move.sub(fwd);
+    if (keys['KeyA'] || keys['ArrowLeft'])   move.sub(right);
+    if (keys['KeyD'] || keys['ArrowRight'])  move.add(right);
+    if (keys['KeyQ'] || keys['Space'])       move.add(up);
     if (keys['KeyE'] || keys['ControlLeft']) move.sub(up);
+
+    // Virtual joystick: dy = forward/back, dx = strafe
+    if (joyState.active) {
+        if (Math.abs(joyState.dy) > 0.08) {
+            if (joyState.dy < 0) move.add(fwd.clone().multiplyScalar(-joyState.dy));
+            else                 move.sub(fwd.clone().multiplyScalar( joyState.dy));
+        }
+        if (Math.abs(joyState.dx) > 0.08) {
+            if (joyState.dx > 0) move.add(right.clone().multiplyScalar( joyState.dx));
+            else                 move.sub(right.clone().multiplyScalar(-joyState.dx));
+        }
+    }
 
     const target = move.lengthSq() > 0
         ? move.normalize().multiplyScalar(spd)
