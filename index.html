@@ -84,7 +84,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.52;
+renderer.toneMappingExposure = 0.72;
 document.body.appendChild(renderer.domElement);
 
 const scene  = new THREE.Scene();
@@ -93,7 +93,7 @@ camera.position.set(0, 280, 7800);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.18, 0.26, 0.30);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.40, 0.22);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -181,10 +181,10 @@ function starField(count, spread, sMin, sMax) {
         col[i*3]=c.r*b; col[i*3+1]=c.g*b; col[i*3+2]=c.b*b;
         sz[i]=rnd(sMin,sMax);
     }
-    return buildPts(pos,col,sz, ptMat(TEX_STAR, 580, 1.0, 5.0, 0.92));
+    return buildPts(pos,col,sz, ptMat(TEX_STAR, 700, 1.2, 6.5, 1.0));
 }
-scene.add(starField(90000, 200000, 0.4, 2.2));
-scene.add(starField(18000,  35000, 0.8, 3.8));
+scene.add(starField(90000, 200000, 0.5, 3.0));
+scene.add(starField(18000,  35000, 1.0, 5.0));
 
 // ── GALAXY BUILDER ───────────────────────────────────────────────────────────
 const galaxyReg = [];
@@ -309,39 +309,48 @@ function mkMilkyWay() {
 // ── BLACK HOLE (Sgr A*) ──────────────────────────────────────────────────────
 function mkBlackHole() {
     const G=new THREE.Group();
-    // Event horizon
-    G.add(new THREE.Mesh(new THREE.SphereGeometry(38,32,32), new THREE.MeshBasicMaterial({color:0x000000})));
-    // Photon ring glow
-    G.add(new THREE.Mesh(new THREE.SphereGeometry(50,32,32), new THREE.MeshBasicMaterial({color:new THREE.Color(.75,.5,.15),transparent:true,opacity:.07,side:THREE.BackSide})));
 
-    // Accretion disc
-    const DN=65000;
+    // Black sphere (event horizon)
+    G.add(new THREE.Mesh(new THREE.SphereGeometry(80,32,32), new THREE.MeshBasicMaterial({color:0x000000})));
+
+    // Bright photon ring — glows with bloom
+    const ringMat=new THREE.MeshBasicMaterial({color:new THREE.Color(1.0,.65,.15),transparent:true,opacity:.55,side:THREE.BackSide});
+    G.add(new THREE.Mesh(new THREE.SphereGeometry(92,32,32), ringMat));
+
+    // Outer amber glow shell
+    G.add(new THREE.Mesh(new THREE.SphereGeometry(160,32,32), new THREE.MeshBasicMaterial({color:new THREE.Color(.9,.45,.08),transparent:true,opacity:.06,side:THREE.BackSide})));
+
+    // Accretion disc — flat particle ring, bright inner, doppler-colored
+    const DN=80000;
     const dp=new Float32Array(DN*3), dc=new Float32Array(DN*3), ds=new Float32Array(DN);
     for (let i=0; i<DN; i++) {
-        const rr=rnd(50,290), th=Math.random()*Math.PI*2;
-        const h=(Math.random()-.5)*Math.max(1.5,(rr-50)*.10);
+        const rr=rnd(95,480), th=Math.random()*Math.PI*2;
+        // Very flat disc — thinner near inner edge
+        const h=(Math.random()-.5)*Math.max(2,(rr-95)*.08);
         dp[i*3]=rr*Math.cos(th); dp[i*3+1]=h; dp[i*3+2]=rr*Math.sin(th);
-        const dop=Math.cos(th), inner=Math.max(0,1-(rr-50)/120);
-        const hot=new THREE.Color(1.0,.50,.08), cold=new THREE.Color(.3,.7,1.0);
+        // Doppler: left=blue (approaching), right=red/orange (receding)
+        const dop=Math.cos(th);
+        const inner=Math.max(0,1-(rr-95)/200); // brightness falloff
+        const hot=new THREE.Color(1.0,.55,.05), cold=new THREE.Color(.25,.65,1.0);
         const c=hot.clone().lerp(cold,(dop+1)*.5);
-        c.multiplyScalar(rnd(.4,1.4)*(.25+inner*.9));
+        c.multiplyScalar(rnd(.5,1.8)*(.3+inner*1.1));
         dc[i*3]=c.r; dc[i*3+1]=c.g; dc[i*3+2]=c.b;
-        ds[i]=rnd(.3,inner>.5?2.8:1.4);
+        ds[i]=rnd(.4, inner>.6?4.5:2.0);
     }
-    G.add(buildPts(dp,dc,ds, ptMat(TEX_SOFT,750,.3,3.5,.9)));
+    G.add(buildPts(dp,dc,ds, ptMat(TEX_SOFT,900,.4,5.0,.95)));
 
-    // Jets
-    const JN=9000;
+    // Relativistic jets — blue-white columns N and S
+    const JN=12000;
     const jp=new Float32Array(JN*3), jc=new Float32Array(JN*3), js=new Float32Array(JN);
     for (let i=0; i<JN; i++) {
-        const side=i<JN/2?1:-1, h=rnd(55,520)*side, sp=Math.abs(h)*.055;
+        const side=i<JN/2?1:-1, h=rnd(90,700)*side, sp=Math.abs(h)*.05;
         jp[i*3]=(Math.random()-.5)*sp; jp[i*3+1]=h; jp[i*3+2]=(Math.random()-.5)*sp;
-        const t=Math.abs(h)/520;
-        const c=new THREE.Color(.35,.65,1.0).lerp(new THREE.Color(.15,.45,1.0),t);
-        c.multiplyScalar(rnd(.25,.9)*(1-t*.65));
-        jc[i*3]=c.r; jc[i*3+1]=c.g; jc[i*3+2]=c.b; js[i]=rnd(.4,1.8);
+        const t=Math.abs(h)/700;
+        const c=new THREE.Color(.45,.75,1.0).lerp(new THREE.Color(.2,.5,1.0),t);
+        c.multiplyScalar(rnd(.4,1.2)*(1-t*.6));
+        jc[i*3]=c.r; jc[i*3+1]=c.g; jc[i*3+2]=c.b; js[i]=rnd(.4,2.2);
     }
-    G.add(buildPts(jp,jc,js, ptMat(TEX_SOFT,550,.3,2.5,.8)));
+    G.add(buildPts(jp,jc,js, ptMat(TEX_SOFT,600,.4,3.0,.85)));
     scene.add(G);
     return G;
 }
@@ -352,10 +361,14 @@ const ssObjects = [];
 
 function mkSolarSystem() {
     const G=new THREE.Group(); G.position.copy(SS_POS);
-    // Sun
-    const sun=new THREE.Mesh(new THREE.SphereGeometry(11,32,32), new THREE.MeshBasicMaterial({color:new THREE.Color(1.0,.88,.48)}));
+    // Sun with animated surface shader
+    const sunCol=new THREE.Color(1.0,.88,.48);
+    const sunMat=starSurfaceMat(sunCol); starMats.push(sunMat);
+    const sun=new THREE.Mesh(new THREE.SphereGeometry(11,24,24), sunMat);
     G.add(sun);
-    G.add(new THREE.Mesh(new THREE.SphereGeometry(20,32,32), new THREE.MeshBasicMaterial({color:new THREE.Color(1.0,.65,.18),transparent:true,opacity:.07,side:THREE.BackSide})));
+    // Sun corona layers
+    G.add(new THREE.Mesh(new THREE.SphereGeometry(18,24,24), new THREE.MeshBasicMaterial({color:new THREE.Color(1.0,.72,.22),transparent:true,opacity:.18,side:THREE.BackSide})));
+    G.add(new THREE.Mesh(new THREE.SphereGeometry(32,24,24), new THREE.MeshBasicMaterial({color:new THREE.Color(1.0,.55,.10),transparent:true,opacity:.05,side:THREE.BackSide})));
 
     const planets=[
         ['Меркурий', 26, 1.1, new THREE.Color(.70,.62,.52), null,       7.4 ],
@@ -405,11 +418,40 @@ function mkNebula(cfg) {
     nebReg.push({pts,name,pos:pos.clone(),radius});
 }
 
+// Procedural star surface shader — pulsing surface detail + corona
+function starSurfaceMat(col) {
+    return new THREE.ShaderMaterial({
+        uniforms: { uCol:{value:col}, uTime:{value:0} },
+        vertexShader:`
+            varying vec3 vN; varying vec3 vP;
+            void main(){ vN=normalize(normalMatrix*normal); vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+        fragmentShader:`
+            uniform vec3 uCol; uniform float uTime;
+            varying vec3 vN; varying vec3 vP;
+            float hash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5);}
+            float noise(vec3 p){vec3 i=floor(p);vec3 f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);}
+            void main(){
+                float n=noise(vP*.18+uTime*.12)*0.5+noise(vP*.42+uTime*.07)*0.3+noise(vP*.9)*0.2;
+                float limb=pow(max(dot(vN,vec3(0,0,1)),0.),0.4);
+                vec3 hotSpot=uCol*1.4; vec3 coolSpot=uCol*.7;
+                vec3 c=mix(coolSpot,hotSpot,n*limb);
+                gl_FragColor=vec4(c,1.);
+            }`,
+    });
+}
+
+const starMats=[];
 function addStar(pos,col,r) {
-    const m=new THREE.Mesh(new THREE.SphereGeometry(r,12,12),new THREE.MeshBasicMaterial({color:col}));
+    const mat=starSurfaceMat(col.clone());
+    starMats.push(mat);
+    const m=new THREE.Mesh(new THREE.SphereGeometry(r,20,20), mat);
     m.position.copy(pos); scene.add(m);
-    const h=new THREE.Mesh(new THREE.SphereGeometry(r*3.5,12,12),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.07}));
+    // Large soft corona
+    const h=new THREE.Mesh(new THREE.SphereGeometry(r*5,16,16),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.06,side:THREE.BackSide}));
     h.position.copy(pos); scene.add(h);
+    // Medium glow
+    const g=new THREE.Mesh(new THREE.SphereGeometry(r*2.2,16,16),new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.18,side:THREE.BackSide}));
+    g.position.copy(pos); scene.add(g);
 }
 
 // ── METEORS ──────────────────────────────────────────────────────────────────
@@ -441,50 +483,59 @@ function updateMeteors(dt) {
     }
 }
 
-// ── HYPERSPACE TRAILS ────────────────────────────────────────────────────────
-let trailMesh=null;
-{
-    const N=700, segPos=new Float32Array(N*6);
-    for (let i=0;i<N;i++) {
-        const th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
-        const rr=rnd(15,1800);
-        const bx=rr*Math.sin(ph)*Math.cos(th), by=rr*Math.sin(ph)*Math.sin(th), bz=-rnd(8,2500);
-        segPos[i*6]=bx; segPos[i*6+1]=by; segPos[i*6+2]=bz;
-        segPos[i*6+3]=bx; segPos[i*6+4]=by; segPos[i*6+5]=bz-rnd(6,55);
-    }
-    const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(segPos,3));
-    const mat=new THREE.LineBasicMaterial({color:new THREE.Color(.50,.78,1.),transparent:true,opacity:0.});
-    trailMesh=new THREE.LineSegments(geo,mat);
-    camera.add(trailMesh); scene.add(camera);
-}
-function updateTrail(boosting,dt) {
-    if (!trailMesh) return;
-    trailMesh.material.opacity=THREE.MathUtils.lerp(trailMesh.material.opacity, boosting?.52:0., dt*4.5);
-}
+// Trails removed per user request
 
 // ── AUDIO ────────────────────────────────────────────────────────────────────
 let audioCtx=null, masterGain=null, drones=[], audioOn=false;
+
 function initAudio() {
     audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-    masterGain=audioCtx.createGain(); masterGain.gain.value=0; masterGain.connect(audioCtx.destination);
-    [[48,.28],[72,.12],[110,.06],[144,.04]].forEach(([f,g])=>{
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    masterGain=audioCtx.createGain(); masterGain.gain.value=0.55; masterGain.connect(audioCtx.destination);
+
+    // Convolver for reverb-like space feel
+    const bufLen=audioCtx.sampleRate*2.5;
+    const irBuf=audioCtx.createBuffer(2,bufLen,audioCtx.sampleRate);
+    for(let ch=0;ch<2;ch++){const d=irBuf.getChannelData(ch);for(let i=0;i<bufLen;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/bufLen,2.5);}
+    const conv=audioCtx.createConvolver(); conv.buffer=irBuf;
+    const convGain=audioCtx.createGain(); convGain.gain.value=0.35;
+    conv.connect(convGain); convGain.connect(masterGain);
+
+    // Layered drones: sub-bass + harmonics + shimmer
+    [[36,.40,'sine'],[54,.22,'sine'],[72,.12,'sine'],[108,.06,'triangle'],[144,.03,'sine']].forEach(([f,g,type])=>{
         const o=audioCtx.createOscillator(), gn=audioCtx.createGain();
-        gn.gain.value=g; o.type='sine'; o.frequency.value=f;
-        o.connect(gn); gn.connect(masterGain); o.start();
+        gn.gain.value=g; o.type=type; o.frequency.value=f;
+        // Slight detune for richness
+        o.detune.value=rnd(-8,8);
+        o.connect(gn); gn.connect(masterGain); gn.connect(conv); o.start();
         drones.push({o,gn});
     });
+
+    // Low-pass filtered noise for cosmic hiss
+    const noiseLen=audioCtx.sampleRate;
+    const noiseBuf=audioCtx.createBuffer(1,noiseLen,audioCtx.sampleRate);
+    const nd=noiseBuf.getChannelData(0); for(let i=0;i<noiseLen;i++) nd[i]=Math.random()*2-1;
+    const nSrc=audioCtx.createBufferSource(); nSrc.buffer=noiseBuf; nSrc.loop=true;
+    const lp=audioCtx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=180;
+    const nGain=audioCtx.createGain(); nGain.gain.value=0.04;
+    nSrc.connect(lp); lp.connect(nGain); nGain.connect(masterGain); nSrc.start();
 }
+
 function toggleAudio() {
-    if(!audioCtx) initAudio();
-    audioOn=!audioOn;
-    masterGain.gain.setTargetAtTime(audioOn?.22:0,audioCtx.currentTime,.6);
+    if(!audioCtx) { initAudio(); audioOn=true; }
+    else {
+        audioOn=!audioOn;
+        if(audioCtx.state==='suspended') audioCtx.resume();
+        masterGain.gain.setTargetAtTime(audioOn?.55:0, audioCtx.currentTime, .5);
+    }
     document.getElementById('audioBtn').textContent=(audioOn?'🔊':'🔇')+' ЗВУК';
 }
+
 function updateAudio(dMW) {
-    if(!audioCtx||!audioOn) return;
-    const t=audioCtx.currentTime, mw=Math.max(0,1-dMW/14000);
-    drones[0].o.frequency.setTargetAtTime(48+mw*18,t,.8);
-    drones[1].gn.gain.setTargetAtTime(.10+mw*.10,t,.8);
+    if(!audioCtx||!audioOn||drones.length===0) return;
+    const t=audioCtx.currentTime, mw=Math.max(0,1-dMW/12000);
+    drones[0].o.frequency.setTargetAtTime(36+mw*20, t, 1.0);
+    drones[2].gn.gain.setTargetAtTime(.10+mw*.14, t, 1.0);
 }
 
 // ── INFO CARDS ────────────────────────────────────────────────────────────────
@@ -695,7 +746,7 @@ function animate() {
         velocity.lerp(tgt,dt*3.5);
         camera.position.addScaledVector(velocity,dt);
         speed=velocity.length()/100;
-        updateTrail(fast,dt);
+        // (trails removed)
     }
 
     // Galaxy rotation
@@ -710,6 +761,10 @@ function animate() {
     }
 
     updateMeteors(dt);
+
+    // Animate star surface shaders
+    const now=performance.now()*.001;
+    for(const m of starMats) m.uniforms.uTime.value=now;
 
     hudT+=dt;
     if(hudT>.06){
